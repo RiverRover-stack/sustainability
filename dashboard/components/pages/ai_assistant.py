@@ -23,9 +23,29 @@ import streamlit as st
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-from energy_agent import EnergyAdvisorAgent, get_energy_agent
-from knowledge_base import get_knowledge_base, query_knowledge_base
+# Add src directory to path
+_src_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'src')
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+
+try:
+    from agent.energy_agent import EnergyAdvisorAgent, get_energy_agent
+    from agent.knowledge_base import get_knowledge_base, query_knowledge_base
+    AGENT_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Agent import error - {e}")
+    AGENT_AVAILABLE = False
+    
+    # Mock fallbacks
+    class EnergyAdvisorAgent:
+        def set_user_data(self, df): pass
+        def chat(self, msg): return {'response': 'AI Agent not available. Please check imports.', 'sources': [], 'status': 'fallback'}
+        def analyze_consumption(self): return {'status': 'error', 'message': 'Agent not available'}
+        def get_quick_answer(self, topic): return f'Information about {topic} is not available.'
+    
+    def get_energy_agent(api_key=None): return EnergyAdvisorAgent()
+    def get_knowledge_base(): return type('KB', (), {'documents': []})()
+    def query_knowledge_base(q): return {'sources': []}
 
 
 def render_ai_assistant_page(filtered_df):

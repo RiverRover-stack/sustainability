@@ -24,12 +24,20 @@ Failure Modes:
 import numpy as np
 from typing import List, Dict
 
-from knowledge_documents import (
-    ENERGY_KNOWLEDGE_BASE,
-    get_all_documents,
-    get_documents_by_category,
-    get_all_categories
-)
+try:
+    from .knowledge_documents import (
+        ENERGY_KNOWLEDGE_BASE,
+        get_all_documents,
+        get_documents_by_category,
+        get_all_categories
+    )
+except ImportError:
+    from knowledge_documents import (
+        ENERGY_KNOWLEDGE_BASE,
+        get_all_documents,
+        get_documents_by_category,
+        get_all_categories
+    )
 
 
 class KnowledgeBase:

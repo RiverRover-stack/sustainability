@@ -1,7 +1,10 @@
 """Carbon reduction goals and impact calculations."""
 
 from typing import Dict, List
-from emission_factors import BENCHMARKS, get_emission_factor
+try:
+    from .emission_factors import BENCHMARKS, get_emission_factor
+except ImportError:
+    from emission_factors import BENCHMARKS, get_emission_factor
 
 
 def calculate_reduction_impact(current_kwh: float, reduction_percent: float, emission_factor: float = None) -> Dict:

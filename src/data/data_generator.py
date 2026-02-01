@@ -29,7 +29,10 @@ from datetime import datetime, timedelta
 import os
 
 # Import tariff functions for backward compatibility
-from tariff_calculator import get_tariff_slabs, calculate_bill
+try:
+    from .tariff_calculator import get_tariff_slabs, calculate_bill
+except ImportError:
+    from tariff_calculator import get_tariff_slabs, calculate_bill
 
 
 def generate_data(
