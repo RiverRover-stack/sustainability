@@ -1,224 +1,95 @@
 """
-Smart AI Energy Consumption Predictor
-Model Training Module
+Model Training Pipeline Module
 
-Trains and evaluates multiple ML models for energy consumption forecasting.
-Includes SHAP explainability for transparent predictions.
+File Responsibility:
+    Orchestrates training of all ML models and generates comparison report.
+    Now includes MLflow experiment tracking for versioning and comparison.
+
+Inputs:
+    - Data file path
+    - Models output directory
+    - Optional: MLflow experiment name
+
+Outputs:
+    - Trained model files (.pkl, .h5)
+    - Model comparison CSV
+    - Feature importance CSV
+    - MLflow experiment logs
+
+Assumptions:
+    - Data is preprocessed by preprocessing module
+    - Models directory exists or will be created
+    - MLflow is installed (optional, graceful fallback)
+
+Failure Modes:
+    - Missing data file raises FileNotFoundError
+    - Insufficient memory for large models
+    - MLflow errors are logged but don't stop training
 """
 
 import os
-import pickle
-import numpy as np
 import pandas as pd
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
-import xgboost as xgb
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import local modules
-from preprocessing import load_data, prepare_features, prepare_data_for_ml, prepare_data_for_lstm
+# Import preprocessing functions
+try:
+    from data.preprocessing import load_data, prepare_features, prepare_data_for_ml, prepare_data_for_lstm
+except ImportError:
+    from preprocessing import load_data, prepare_features, prepare_data_for_ml, prepare_data_for_lstm
+
+# Import training functions from training package
+from training import (
+    train_linear_regression,
+    train_random_forest,
+    train_xgboost,
+    train_lstm,
+    get_shap_explanations
+)
+
+# Import MLflow tracking (optional)
+try:
+    from mlops import MLflowTracker, log_model_metrics
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    print("Note: MLflow not available. Install with: pip install mlflow")
 
 
-def evaluate_model(y_true: np.ndarray, y_pred: np.ndarray, model_name: str) -> dict:
-    """Calculate evaluation metrics for a model."""
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    mape = mean_absolute_percentage_error(y_true, y_pred) * 100
+def train_all_models(
+    data_path: str,
+    models_dir: str,
+    experiment_name: str = "energy-predictor",
+    use_mlflow: bool = True
+):
+    """
+    Train all models and generate comparison report.
     
-    metrics = {
-        'model': model_name,
-        'MAE': round(mae, 4),
-        'RMSE': round(rmse, 4),
-        'MAPE': round(mape, 2)
-    }
+    Purpose: Complete training pipeline with evaluation and experiment tracking.
     
-    print(f"\n{model_name} Results:")
-    print(f"  MAE:  {metrics['MAE']:.4f} kWh")
-    print(f"  RMSE: {metrics['RMSE']:.4f} kWh")
-    print(f"  MAPE: {metrics['MAPE']:.2f}%")
-    
-    return metrics
-
-
-def train_linear_regression(X_train, y_train, X_test, y_test, save_path=None):
-    """Train and evaluate Linear Regression model."""
-    print("\n" + "="*50)
-    print("Training Linear Regression (Baseline)")
-    print("="*50)
-    
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    
-    y_pred = model.predict(X_test)
-    metrics = evaluate_model(y_test, y_pred, "Linear Regression")
-    
-    if save_path:
-        with open(save_path, 'wb') as f:
-            pickle.dump(model, f)
-        print(f"Model saved to {save_path}")
-    
-    return model, metrics, y_pred
-
-
-def train_random_forest(X_train, y_train, X_test, y_test, save_path=None):
-    """Train and evaluate Random Forest model."""
-    print("\n" + "="*50)
-    print("Training Random Forest")
-    print("="*50)
-    
-    model = RandomForestRegressor(
-        n_estimators=100,
-        max_depth=15,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=42,
-        n_jobs=-1
-    )
-    model.fit(X_train, y_train)
-    
-    y_pred = model.predict(X_test)
-    metrics = evaluate_model(y_test, y_pred, "Random Forest")
-    
-    if save_path:
-        with open(save_path, 'wb') as f:
-            pickle.dump(model, f)
-        print(f"Model saved to {save_path}")
-    
-    return model, metrics, y_pred
-
-
-def train_xgboost(X_train, y_train, X_test, y_test, save_path=None):
-    """Train and evaluate XGBoost model."""
-    print("\n" + "="*50)
-    print("Training XGBoost")
-    print("="*50)
-    
-    model = xgb.XGBRegressor(
-        n_estimators=200,
-        max_depth=8,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        verbosity=0
-    )
-    model.fit(X_train, y_train)
-    
-    y_pred = model.predict(X_test)
-    metrics = evaluate_model(y_test, y_pred, "XGBoost")
-    
-    if save_path:
-        with open(save_path, 'wb') as f:
-            pickle.dump(model, f)
-        print(f"Model saved to {save_path}")
-    
-    return model, metrics, y_pred
-
-
-def train_lstm(X_train, y_train, X_test, y_test, scaler, save_path=None):
-    """Train and evaluate LSTM model."""
-    print("\n" + "="*50)
-    print("Training LSTM")
-    print("="*50)
-    
-    try:
-        import tensorflow as tf
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import LSTM, Dense, Dropout
-        from tensorflow.keras.callbacks import EarlyStopping
+    Inputs:
+        data_path: Path to CSV data file
+        models_dir: Directory to save trained models
+        experiment_name: MLflow experiment name
+        use_mlflow: Whether to log to MLflow
         
-        # Suppress TensorFlow warnings
-        tf.get_logger().setLevel('ERROR')
+    Outputs:
+        Tuple of (results DataFrame, feature importance DataFrame)
         
-        model = Sequential([
-            LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-            Dropout(0.2),
-            LSTM(32, return_sequences=False),
-            Dropout(0.2),
-            Dense(16, activation='relu'),
-            Dense(1)
-        ])
-        
-        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        
-        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-        
-        print("Training LSTM model... (this may take a while)")
-        history = model.fit(
-            X_train, y_train,
-            validation_split=0.1,
-            epochs=50,
-            batch_size=32,
-            callbacks=[early_stop],
-            verbose=0
-        )
-        
-        y_pred = model.predict(X_test, verbose=0).flatten()
-        
-        # Inverse transform predictions
-        if scaler is not None:
-            # Create dummy arrays for inverse transform
-            y_test_inv = y_test * (scaler.data_max_[0] - scaler.data_min_[0]) + scaler.data_min_[0]
-            y_pred_inv = y_pred * (scaler.data_max_[0] - scaler.data_min_[0]) + scaler.data_min_[0]
-        else:
-            y_test_inv, y_pred_inv = y_test, y_pred
-        
-        metrics = evaluate_model(y_test_inv, y_pred_inv, "LSTM")
-        
-        if save_path:
-            model.save(save_path)
-            print(f"Model saved to {save_path}")
-        
-        return model, metrics, y_pred_inv
-        
-    except ImportError:
-        print("TensorFlow not available. Skipping LSTM training.")
-        return None, None, None
-
-
-def get_shap_explanations(model, X_train, X_test, feature_names, model_name="Model"):
-    """Generate SHAP explanations for model predictions."""
-    try:
-        import shap
-        
-        print(f"\nGenerating SHAP explanations for {model_name}...")
-        
-        if model_name == "XGBoost":
-            explainer = shap.TreeExplainer(model)
-        elif model_name == "Random Forest":
-            explainer = shap.TreeExplainer(model)
-        else:
-            # For linear models, use a sample for speed
-            explainer = shap.KernelExplainer(model.predict, shap.sample(X_train, 100))
-        
-        shap_values = explainer.shap_values(X_test[:100])
-        
-        # Get feature importance from SHAP
-        feature_importance = pd.DataFrame({
-            'feature': feature_names,
-            'importance': np.abs(shap_values).mean(axis=0)
-        }).sort_values('importance', ascending=False)
-        
-        print(f"\nTop 10 Important Features ({model_name}):")
-        print(feature_importance.head(10).to_string(index=False))
-        
-        return shap_values, feature_importance
-        
-    except ImportError:
-        print("SHAP not available. Install with: pip install shap")
-        return None, None
-    except Exception as e:
-        print(f"SHAP explanation failed: {e}")
-        return None, None
-
-
-def train_all_models(data_path: str, models_dir: str):
-    """Train all models and generate comparison report."""
+    Side effects: Saves models, CSVs, and MLflow logs
+    """
+    # Initialize MLflow if available
+    tracker = None
+    if use_mlflow and MLFLOW_AVAILABLE:
+        try:
+            tracker = MLflowTracker(experiment_name)
+            print(f"✓ MLflow tracking enabled (experiment: {experiment_name})")
+        except Exception as e:
+            print(f"Warning: MLflow setup failed: {e}")
+            tracker = None
     
     # Load and prepare data
-    print("Loading and preprocessing data...")
+    print("\nLoading and preprocessing data...")
     df = load_data(data_path)
     df_processed = prepare_features(df)
     
@@ -233,45 +104,105 @@ def train_all_models(data_path: str, models_dir: str):
     
     all_metrics = []
     
-    # Train Linear Regression
+    # ========== Train Linear Regression ==========
+    if tracker:
+        tracker.start_run(run_name="linear_regression")
+        tracker.log_params({"model_type": "LinearRegression", "features": len(feature_names)})
+    
     lr_model, lr_metrics, lr_pred = train_linear_regression(
         X_train, y_train, X_test, y_test,
         save_path=os.path.join(models_dir, "linear_regression.pkl")
     )
     all_metrics.append(lr_metrics)
     
-    # Train Random Forest
+    if tracker:
+        tracker.log_metrics({"MAE": lr_metrics['MAE'], "RMSE": lr_metrics['RMSE'], "MAPE": lr_metrics['MAPE']})
+        tracker.log_model(lr_model, "linear_regression", "sklearn")
+        tracker.end_run()
+    
+    # ========== Train Random Forest ==========
+    rf_params = {
+        "n_estimators": 100,
+        "max_depth": 15,
+        "min_samples_split": 5,
+        "min_samples_leaf": 2
+    }
+    
+    if tracker:
+        tracker.start_run(run_name="random_forest")
+        tracker.log_params({**rf_params, "model_type": "RandomForest", "features": len(feature_names)})
+    
     rf_model, rf_metrics, rf_pred = train_random_forest(
         X_train, y_train, X_test, y_test,
         save_path=os.path.join(models_dir, "random_forest.pkl")
     )
     all_metrics.append(rf_metrics)
     
-    # Train XGBoost
+    if tracker:
+        tracker.log_metrics({"MAE": rf_metrics['MAE'], "RMSE": rf_metrics['RMSE'], "MAPE": rf_metrics['MAPE']})
+        tracker.log_model(rf_model, "random_forest", "sklearn")
+        tracker.end_run()
+    
+    # ========== Train XGBoost ==========
+    xgb_params = {
+        "n_estimators": 200,
+        "max_depth": 8,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8
+    }
+    
+    if tracker:
+        tracker.start_run(run_name="xgboost")
+        tracker.log_params({**xgb_params, "model_type": "XGBoost", "features": len(feature_names)})
+    
     xgb_model, xgb_metrics, xgb_pred = train_xgboost(
         X_train, y_train, X_test, y_test,
         save_path=os.path.join(models_dir, "xgboost_model.pkl")
     )
     all_metrics.append(xgb_metrics)
     
-    # SHAP explanations for best model (XGBoost typically)
+    if tracker:
+        tracker.log_metrics({"MAE": xgb_metrics['MAE'], "RMSE": xgb_metrics['RMSE'], "MAPE": xgb_metrics['MAPE']})
+        tracker.log_model(xgb_model, "xgboost", "xgboost")
+        tracker.end_run()
+    
+    # SHAP explanations for XGBoost
     shap_values, feature_importance = get_shap_explanations(
         xgb_model, X_train, X_test, feature_names, "XGBoost"
     )
     
-    # Train LSTM
+    # ========== Train LSTM ==========
     X_train_lstm, X_test_lstm, y_train_lstm, y_test_lstm, lstm_scaler, lstm_features = prepare_data_for_lstm(df)
+    
+    lstm_params = {
+        "sequence_length": 24,
+        "lstm_units": [64, 32],
+        "dropout": 0.2,
+        "epochs": 50
+    }
+    
+    if tracker:
+        tracker.start_run(run_name="lstm")
+        tracker.log_params({**lstm_params, "model_type": "LSTM", "features": len(lstm_features)})
+    
     lstm_model, lstm_metrics, lstm_pred = train_lstm(
         X_train_lstm, y_train_lstm, X_test_lstm, y_test_lstm, lstm_scaler,
         save_path=os.path.join(models_dir, "lstm_model.h5")
     )
+    
     if lstm_metrics:
         all_metrics.append(lstm_metrics)
+        if tracker:
+            tracker.log_metrics({"MAE": lstm_metrics['MAE'], "RMSE": lstm_metrics['RMSE'], "MAPE": lstm_metrics['MAPE']})
     
-    # Summary
-    print("\n" + "="*60)
+    if tracker:
+        tracker.end_run()
+    
+    # ========== Summary ==========
+    print("\n" + "=" * 60)
     print("MODEL COMPARISON SUMMARY")
-    print("="*60)
+    print("=" * 60)
     
     results_df = pd.DataFrame(all_metrics)
     print(results_df.to_string(index=False))
@@ -289,10 +220,22 @@ def train_all_models(data_path: str, models_dir: str):
         print("⚠ Note: Consider adding more features or tuning hyperparameters")
     
     # Save results
-    results_df.to_csv(os.path.join(models_dir, "model_comparison.csv"), index=False)
+    results_path = os.path.join(models_dir, "model_comparison.csv")
+    results_df.to_csv(results_path, index=False)
     
     if feature_importance is not None:
-        feature_importance.to_csv(os.path.join(models_dir, "feature_importance.csv"), index=False)
+        importance_path = os.path.join(models_dir, "feature_importance.csv")
+        feature_importance.to_csv(importance_path, index=False)
+        
+        # Log artifacts to MLflow
+        if tracker:
+            tracker.start_run(run_name="artifacts")
+            tracker.log_artifact(results_path, "results")
+            tracker.log_artifact(importance_path, "results")
+            tracker.end_run()
+    
+    if MLFLOW_AVAILABLE and use_mlflow:
+        print(f"\n📊 View experiments: mlflow ui --port 5000")
     
     return results_df, feature_importance
 
@@ -304,6 +247,7 @@ if __name__ == "__main__":
     
     if os.path.exists(data_path):
         results, features = train_all_models(data_path, models_dir)
+        print("\n✓ Training pipeline completed successfully!")
     else:
         print(f"Data file not found: {data_path}")
         print("Run data_generator.py first to create the dataset.")

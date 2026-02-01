@@ -1,0 +1,65 @@
+# Docker ignore file - exclude unnecessary files from build
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Development files
+.env
+.env.local
+*.bak
+
+# MLflow runs (mounted as volume)
+mlruns/
+
+# Large model files (if not needed in container)
+# models/*.h5

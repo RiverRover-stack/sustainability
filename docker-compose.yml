@@ -1,0 +1,82 @@
+# Docker Compose for Smart AI Energy Predictor
+# Run all services: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # ==================================================
+  # Main Dashboard (Streamlit)
+  # ==================================================
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: energy-dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist data and models
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./mlruns:/app/mlruns
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - PYTHONPATH=/app/src
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/_stcore/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ==================================================
+  # MLflow Tracking Server (Optional)
+  # ==================================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.0
+    container_name: energy-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/mlflow/mlruns
+    command: >
+      mlflow server --backend-store-uri file:///mlflow/mlruns --default-artifact-root file:///mlflow/mlruns --host 0.0.0.0 --port 5000
+    profiles:
+      - mlops
+    restart: unless-stopped
+
+  # ==================================================
+  # FastAPI Backend (Optional - for API access)
+  # ==================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: energy-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - PYTHONPATH=/app/src
+    command: [ "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000" ]
+    profiles:
+      - api
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+
+# ==================================================
+# Networks
+# ==================================================
+networks:
+  default:
+    name: energy-network
+
+# ==================================================
+# Volumes (for persistence)
+# ==================================================
+volumes:
+  mlflow_data:
+    driver: local

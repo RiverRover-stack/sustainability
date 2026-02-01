@@ -1,17 +1,28 @@
 """
-Smart AI Energy Consumption Predictor
-Knowledge Base Module for RAG System
+Knowledge Documents Module
 
-Contains energy-related knowledge documents and vector search functionality.
+File Responsibility:
+    Contains energy-related knowledge documents for the RAG system.
+    These documents provide context for the AI energy advisor.
+
+Inputs:
+    None (data module)
+
+Outputs:
+    List of knowledge documents with id, category, title, content
+
+Assumptions:
+    - Documents are focused on Indian energy context
+    - Content is factually accurate and up-to-date
+
+Failure Modes:
+    None (stateless data)
 """
 
-import os
-import numpy as np
-from typing import List, Dict, Tuple
-import json
+from typing import List, Dict
 
-# Energy Knowledge Base - Documents for RAG
-ENERGY_KNOWLEDGE_BASE = [
+
+ENERGY_KNOWLEDGE_BASE: List[Dict] = [
     # Energy Saving Tips
     {
         "id": "tip_1",
@@ -110,173 +121,16 @@ ENERGY_KNOWLEDGE_BASE = [
 ]
 
 
-class KnowledgeBase:
-    """RAG Knowledge Base for energy-related queries."""
-    
-    def __init__(self):
-        self.documents = ENERGY_KNOWLEDGE_BASE
-        self.embeddings = None
-        self.model = None
-        self._load_embedding_model()
-    
-    def _load_embedding_model(self):
-        """Load the sentence transformer model for embeddings."""
-        try:
-            from sentence_transformers import SentenceTransformer
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
-            self._compute_embeddings()
-        except ImportError:
-            print("sentence-transformers not installed. Using keyword search fallback.")
-            self.model = None
-    
-    def _compute_embeddings(self):
-        """Compute embeddings for all documents."""
-        if self.model is None:
-            return
-        
-        texts = [f"{doc['title']} {doc['content']}" for doc in self.documents]
-        self.embeddings = self.model.encode(texts, convert_to_numpy=True)
-    
-    def search(self, query: str, top_k: int = 3) -> List[Dict]:
-        """
-        Search the knowledge base for relevant documents.
-        
-        Args:
-            query: User's question
-            top_k: Number of results to return
-            
-        Returns:
-            List of relevant documents with scores
-        """
-        if self.model is not None and self.embeddings is not None:
-            return self._semantic_search(query, top_k)
-        else:
-            return self._keyword_search(query, top_k)
-    
-    def _semantic_search(self, query: str, top_k: int) -> List[Dict]:
-        """Search using semantic similarity."""
-        query_embedding = self.model.encode([query], convert_to_numpy=True)
-        
-        # Compute cosine similarities
-        similarities = np.dot(self.embeddings, query_embedding.T).flatten()
-        
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
-        
-        results = []
-        for idx in top_indices:
-            doc = self.documents[idx].copy()
-            doc['score'] = float(similarities[idx])
-            results.append(doc)
-        
-        return results
-    
-    def _keyword_search(self, query: str, top_k: int) -> List[Dict]:
-        """Fallback keyword-based search."""
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        
-        scores = []
-        for doc in self.documents:
-            text = f"{doc['title']} {doc['content']}".lower()
-            # Count matching words
-            score = sum(1 for word in query_words if word in text)
-            scores.append(score)
-        
-        # Get top-k indices
-        top_indices = np.argsort(scores)[::-1][:top_k]
-        
-        results = []
-        for idx in top_indices:
-            if scores[idx] > 0:
-                doc = self.documents[idx].copy()
-                doc['score'] = scores[idx]
-                results.append(doc)
-        
-        return results
-    
-    def get_context_for_query(self, query: str, max_tokens: int = 1500) -> str:
-        """
-        Get relevant context from knowledge base for a query.
-        
-        Args:
-            query: User's question
-            max_tokens: Maximum context length (approximate)
-            
-        Returns:
-            Concatenated relevant context
-        """
-        results = self.search(query, top_k=3)
-        
-        context_parts = []
-        total_length = 0
-        
-        for doc in results:
-            content = f"**{doc['title']}**\n{doc['content']}\n"
-            if total_length + len(content) < max_tokens * 4:  # Approximate token count
-                context_parts.append(content)
-                total_length += len(content)
-        
-        return "\n---\n".join(context_parts)
-    
-    def get_all_categories(self) -> List[str]:
-        """Get all unique categories in the knowledge base."""
-        return list(set(doc['category'] for doc in self.documents))
-    
-    def get_documents_by_category(self, category: str) -> List[Dict]:
-        """Get all documents in a specific category."""
-        return [doc for doc in self.documents if doc['category'] == category]
+def get_all_documents() -> List[Dict]:
+    """Return all knowledge documents."""
+    return ENERGY_KNOWLEDGE_BASE.copy()
 
 
-# Initialize global knowledge base
-_knowledge_base = None
-
-def get_knowledge_base() -> KnowledgeBase:
-    """Get or create the global knowledge base instance."""
-    global _knowledge_base
-    if _knowledge_base is None:
-        _knowledge_base = KnowledgeBase()
-    return _knowledge_base
+def get_documents_by_category(category: str) -> List[Dict]:
+    """Get documents filtered by category."""
+    return [doc for doc in ENERGY_KNOWLEDGE_BASE if doc['category'] == category]
 
 
-def query_knowledge_base(question: str) -> Dict:
-    """
-    Query the knowledge base and return relevant information.
-    
-    Args:
-        question: User's question about energy
-        
-    Returns:
-        Dictionary with context and sources
-    """
-    kb = get_knowledge_base()
-    results = kb.search(question, top_k=3)
-    context = kb.get_context_for_query(question)
-    
-    return {
-        'context': context,
-        'sources': [{'title': r['title'], 'category': r['category'], 'score': r.get('score', 0)} for r in results]
-    }
-
-
-if __name__ == "__main__":
-    # Test the knowledge base
-    kb = get_knowledge_base()
-    
-    print("=" * 60)
-    print("KNOWLEDGE BASE TEST")
-    print("=" * 60)
-    
-    test_queries = [
-        "How can I save money on AC bills?",
-        "What is the PM Surya Ghar scheme?",
-        "How much CO2 does electricity produce?",
-        "What is a 5-star rating appliance?"
-    ]
-    
-    for query in test_queries:
-        print(f"\nQuery: {query}")
-        print("-" * 40)
-        result = query_knowledge_base(query)
-        print(f"Sources: {[s['title'] for s in result['sources']]}")
-        print(f"Context preview: {result['context'][:200]}...")
+def get_all_categories() -> List[str]:
+    """Get unique category names."""
+    return list(set(doc['category'] for doc in ENERGY_KNOWLEDGE_BASE))
