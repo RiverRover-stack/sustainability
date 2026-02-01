@@ -179,15 +179,6 @@ CO₂ (kg) = kWh × 0.82
 
 ---
 
-## 📚 Documentation
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System design guide
-- [docs/DECISION_LOG.md](docs/DECISION_LOG.md) - Why decisions were made
-- [docs/MODULE_MAP.md](docs/MODULE_MAP.md) - Module responsibilities
-- [docs/KNOWN_UNKNOWNS.md](docs/KNOWN_UNKNOWNS.md) - Known limitations
-
----
-
 ## 📄 License
 
 MIT License - Built for SDG 7: Affordable and Clean Energy
